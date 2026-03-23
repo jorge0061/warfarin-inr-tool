@@ -1252,10 +1252,10 @@ function calcInit(){
   const {a:a_hat,b:b_hat,n_obs}=bayesianParams(dosePts,inrPts,baseINR);
   const {tau:tau_bay,keff:keff_bay}=abToTauKeff(a_hat,b_hat);
   const sens=Math.max(0.4,Math.min(2.5,keff_bay/0.06));
-  priorDoseGlobal=histAvgDose;
+  priorDoseGlobal=avgDose;
 
   const doseRef=histAvgDose;
-  const {dose:recDose,traj:initTraj}=chooseModelDose(latestINRGlobal,baseINR,tLow,tHigh,a_hat,b_hat,doseRef,histAvgDose);
+  const {dose:recDose,traj:initTraj}=chooseModelDose(latestINRGlobal,baseINR,tLow,tHigh,a_hat,b_hat,doseRef,avgDose);
   const stability=assessInitStability(dosePts,inrPts,baseINR,latestINRGlobal,tLow,tHigh,doseRef,{a:a_hat,b:b_hat,n_obs});
 
   const gap=tMid-latestINRGlobal;
@@ -1265,7 +1265,7 @@ function calcInit(){
   lastTTRInit=ttr;
   renderTTR(ttr,document.getElementById('i-res-ttr'),document.getElementById('i-ttr-label'),document.getElementById('i-ttr-card'));
 
-  const schedule=buildSchedule(lastDay,latestINRGlobal,tLow,tHigh,tMid,recDose,baseINR,a_hat,b_hat,histAvgDose);
+  const schedule=buildSchedule(lastDay,latestINRGlobal,tLow,tHigh,tMid,recDose,baseINR,a_hat,b_hat,avgDose);
 
   document.getElementById('i-res-inr').textContent=latestINRGlobal.toFixed(1);
   document.getElementById('i-res-rec').textContent=recDose.toFixed(1);
@@ -1292,7 +1292,7 @@ function calcInit(){
 
   renderParamBars(sens,tau_bay,stability);
   renderSchedule(schedule,startDate,lastDay,lastDayHasDose);
-  buildInitChart(log,inrPts,lastDay,tLow,tHigh,avgDose,startDate,schedule,baseINR,lastDayHasDose,a_hat,b_hat,histAvgDose,dosePts);
+  buildInitChart(log,inrPts,lastDay,tLow,tHigh,avgDose,startDate,schedule,baseINR,lastDayHasDose,a_hat,b_hat,avgDose,dosePts);
   document.getElementById('i-result').style.display='';
 
   saveData();
