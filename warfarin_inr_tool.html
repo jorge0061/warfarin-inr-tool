@@ -130,6 +130,13 @@
   .tbl input { width: 100%; background: none; border: none; outline: none; font-size: 13px; color: var(--text); padding: 3px 4px; border-radius: 4px; }
   .tbl input:focus { background: var(--bg2); }
   .tbl .date-hint { font-size: 10px; color: var(--text3); padding: 1px 4px; }
+  .tbl .log-enable-cell { text-align: center; }
+  .tbl .log-enable { width: 14px; height: 14px; accent-color: var(--blue); cursor: pointer; }
+  .tbl tr.log-row-disabled { opacity: 0.55; }
+  .tbl tr.log-row-disabled .log-day,
+  .tbl tr.log-row-disabled .log-inr,
+  .tbl tr.log-row-disabled .log-dose,
+  .tbl tr.log-row-disabled .log-memo { text-decoration: line-through; }
   .add-btn { font-size: 12px; color: var(--info-text); background: none; border: none; cursor: pointer; padding: 0; margin-top: 8px; }
   .sch-item { display: grid; grid-template-columns: 130px 80px 1fr; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
   .sch-item:last-child { border-bottom: none; }
@@ -293,6 +300,7 @@
       <table class="tbl">
         <thead>
           <tr>
+            <th style="width:40px;">使用</th>
             <th style="width:70px;">日数</th>
             <th style="width:68px;">日付</th>
             <th style="width:82px;">INR</th>
@@ -303,6 +311,7 @@
         </thead>
         <tbody id="i-logBody">
           <tr>
+            <td class="log-enable-cell"><input type="checkbox" class="log-enable" checked onchange="updateLogRowEnabledState(this)"/></td>
             <td><input type="number" step="1" min="0" value="0" class="log-day" oninput="updateLogDateHints()"/></td>
             <td><span class="date-hint log-date-hint">—</span></td>
             <td><input type="number" step="0.1" min="0.5" max="10" placeholder="—" class="log-inr"/></td>
@@ -313,7 +322,7 @@
         </tbody>
       </table>
       <button class="add-btn" onclick="addLogRow()">+ 行を追加</button>
-      <p class="note">INRが未測定の日はINR欄を空白のままにしてください。開始日を設定すると日付列が自動計算されます。</p>
+      <p class="note">INRが未測定の日はINR欄を空白のままにしてください。投与量が空欄の日は前回量継続として扱います。開始日を設定すると日付列が自動計算されます。チェックを外した行は解析に使わず、実測値との見比べ用に表とグラフへ残します。</p>
     </div>
 
     <button class="run-btn" onclick="calcInit()">解析・スケジュール提案</button>
@@ -337,7 +346,7 @@
       </div>
 
       <div class="sec">
-        <div class="sec-title">今後のスケジュール提案</div>
+      <div class="sec-title">次回 INR 確認までの提案</div>
         <div id="i-schedule"></div>
         <p class="note">INR測定後は記録欄に追記し、再解析してください。</p>
       </div>
@@ -445,29 +454,33 @@ DVT / PE       ： 2.0 – 3.0
       </div>
       <hr class="ev-divider">
       <div class="ev-item">
-        <div class="ev-item-title">感受性指数の推定<span class="ev-tag ev-tag-emp">経験的モデル</span></div>
-        <div class="ev-formula">指数重み付き最小二乗推定（忘却係数 λ=0.90）
-各INR測定区間 i について：
-  w_i = λ^(n−1−i)  ← 直近ほど重み大
-  ΔINR_i = INR測定値の差分
-  avgDose_i = 区間内の平均実効投与量
-sens = Σ(w_i × ΔINR_i × avgDose_i × Δt_i)
-       / (0.06 × Σ(w_i × avgDose_i² × Δt_i))
+        <div class="ev-item-title">導入期の K-PD 近似モデル<span class="ev-tag">文献ベース</span></div>
+        <div class="ev-formula">z(k+Δt) = a^Δt × z(k) + b × Dose_eff × (1 − a^Δt)/(1 − a)
+  z = INR − INR_base
 
-高感受性(>1.3)→ τ短縮（収束早い）
-低感受性(&lt;0.7)→ τ延長（収束遅い）
-τ(日) = clip(4.5 / sens, 2.5, 7.0)</div>
-        <div class="ev-ref"><span>①</span> Ansell J, et al. Chest. 2008;133(6 Suppl):160S–198S.<br><span>②</span> Kamali F &amp; Wynne H. Annu Rev Med. 2010;61:63–75. — 基準値 0.06 の出典</div>
+a : INR変化の残りやすさ（遅いほど 1 に近い）
+b : 用量あたりの反応の強さ
+
+実測 INR の系列から a, b を MAP 推定し、
+直前までの投与歴で翌日以降の INR 推移を予測します。</div>
+        <div class="ev-ref"><span>①</span> Hamberg AK, et al. Clin Pharmacol Ther. 2011;90(1):61–70. — warfarin 導入期の Bayesian/K-PD 推定。<br><span>②</span> Holford NHG. Clin Pharmacokinet. 1986;11(6):483–504. — warfarin pharmacokinetic-pharmacodynamic model の基盤。</div>
       </div>
       <hr class="ev-divider">
       <div class="ev-item">
-        <div class="ev-item-title">INR予測モデル（一次指数モデル）<span class="ev-tag ev-tag-emp">簡易PK/PDモデル</span></div>
-        <div class="ev-formula">INR(t) = SS_target + (INR_now − SS_target) × exp(−t / τ)
-  τ = personalTau(sens) = clip(4.5/sens, 2.5, 7.0) 日
-  SS_target = INR_now + (Δdose) × 0.06 × sens × τ
-グラフの「スケジュール予測」は各確認日ごとに用量変更を反映した
-区分的指数モデルで計算されます。</div>
-        <div class="ev-ref"><span>①</span> Holford NHG. Clin Pharmacokinet. 1986;11(6):483–504.<br><span>②</span> warfarin t½≈35–45 h、FII t½≈60 h から τ≈4–6 日が導出される。</div>
+        <div class="ev-item-title">直前用量の残効補正と用量探索<span class="ev-tag ev-tag-emp">実装近似</span></div>
+        <div class="ev-formula">Dose_eff(day) = nextDose + (priorDose − nextDose) × exp(−(day−1)/τcarry)
+  τcarry = 3.6 日
+
+推奨量の決め方
+  候補用量 d = 0, 0.5, 1.0 ... 15.0 mg/日
+  各 d について 7 日先まで予測し、
+  目標域中央からのずれ + 高値超過ペナルティ + 用量変更ペナルティ
+  が最小となる d を選択
+
+画面表示
+  薬効感受性 : b と a から換算した要約指標
+  反応の遅さ : a から換算した時定数 τ</div>
+        <div class="ev-ref"><span>①</span> 因子II turnover により warfarin 効果が遅れて現れるという文献知見に基づく近似補正。<br><span>②</span> 実装上は完全 mechanistic turnover ではなく、導入期の短期予測を安定させるための簡略化です。</div>
       </div>
       <hr class="ev-divider">
       <div class="ev-item">
@@ -506,118 +519,162 @@ let sHist=0, iChart=null, sChart=null;
 function personalTau(sens){
   return Math.max(2.5,Math.min(7.0,4.5/Math.max(0.4,sens)));
 }
-// ── Bayesian MAP 推定（Faggionato et al. IEEE TBME 2023 に基づく） ──────────
-// モデル: INR(k+1) - INR_base = a*(INR(k) - INR_base) + b*dose(k)
-// 集団事前分布: a₀=0.84, b₀=0.05, Σ_p=[[0.07,0.0007],[0.0007,0.03]]
+// ── 導入期 a-b K-PD モデル ──────────────────────────────────
+// モデル: z(k+dt) = a^dt * z(k) + b * dose * (1-a^dt)/(1-a), z = INR - INR_base
+function predictZ(z0,dose,dt,a,b){
+  const aSafe=Math.max(0.01,Math.min(0.999,a));
+  if(dt<=0) return z0;
+  const aDt=Math.pow(aSafe,dt);
+  const bFac=Math.abs(1-aSafe)<1e-6?dt:(1-aDt)/(1-aSafe);
+  return aDt*z0+b*dose*bFac;
+}
 function bayesianParams(dosePts,inrPts,baseINR){
   const a0=0.84,b0=0.05;
   const Sp=[[0.07,0.0007],[0.0007,0.03]];
   const detSp=Sp[0][0]*Sp[1][1]-Sp[0][1]*Sp[1][0];
   const SpInv=[[Sp[1][1]/detSp,-Sp[0][1]/detSp],[-Sp[1][0]/detSp,Sp[0][0]/detSp]];
-  const sv2=0.04; // 測定ノイズ分散 σ_v²≈0.2²
+  const sv2=0.04;
   const pts=[...inrPts].filter(p=>p.inr!==null).sort((a,b)=>a.day-b.day);
   if(pts.length<2) return {a:a0,b:b0,cov:[[0.07,0.0007],[0.0007,0.03]],n_obs:0};
-  let GtG=[[0,0],[0,0]],GtY=[0,0],n_obs=0;
-  for(let i=1;i<pts.length;i++){
-    const dt=pts[i].day-pts[i-1].day;
-    if(dt<=0||dt>60) continue;
-    let doseSumSeg=0,dayCountSeg=0;
-    for(let d=pts[i-1].day;d<pts[i].day;d++){
-      const eff=effectiveDose(dosePts,d);
-      if(eff!==null){doseSumSeg+=eff;dayCountSeg++;}
+  let a_hat=a0,b_hat=b0,cov=[[0.07,0.0007],[0.0007,0.03]],n_obs=0;
+  for(let iter=0;iter<8;iter++){
+    let GtG=[[0,0],[0,0]],GtY=[0,0];
+    n_obs=0;
+    for(let i=1;i<pts.length;i++){
+      const dt=pts[i].day-pts[i-1].day;
+      if(dt<=0||dt>60) continue;
+      let doseSumSeg=0,dayCountSeg=0;
+      for(let d=pts[i-1].day;d<pts[i].day;d++){
+        const eff=effectiveDose(dosePts,d);
+        if(eff!==null){doseSumSeg+=eff;dayCountSeg++;}
+      }
+      if(dayCountSeg===0) continue;
+      n_obs++;
+      const u=doseSumSeg/dayCountSeg;
+      const z1=pts[i-1].inr-baseINR,z2=pts[i].inr-baseINR;
+      const aSafe=Math.max(0.01,Math.min(0.999,a_hat));
+      const aDt=Math.pow(aSafe,dt);
+      const daDt=dt*Math.pow(aSafe,dt-1);
+      const denom=1-aSafe;
+      const bFac=Math.abs(denom)<1e-6?dt:(1-aDt)/denom;
+      const dbFacDa=Math.abs(denom)<1e-6?0:(-daDt*denom+(1-aDt))/(denom*denom);
+      const z2_pred=predictZ(z1,u,dt,a_hat,b_hat);
+      const g0=daDt*z1+b_hat*u*dbFacDa;
+      const g1=u*bFac;
+      const y_obs=z2-z2_pred+g0*a_hat+g1*b_hat;
+      const w=1/sv2;
+      GtG[0][0]+=g0*g0*w; GtG[0][1]+=g0*g1*w;
+      GtG[1][0]+=g1*g0*w; GtG[1][1]+=g1*g1*w;
+      GtY[0]+=g0*y_obs*w; GtY[1]+=g1*y_obs*w;
     }
-    if(dayCountSeg===0) continue;
-    n_obs++;
-    const u=doseSumSeg/dayCountSeg;
-    const z1=pts[i-1].inr-baseINR,z2=pts[i].inr-baseINR;
-    let g0,g1,y_obs;
-    if(dt===1){
-      g0=z1; g1=u; y_obs=z2;
-    } else {
-      // 複数日間隔：事前値 (a0,b0) まわりで線形化（Jacobian 近似）
-      const aDt=Math.pow(a0,dt);
-      const bFac=(1-aDt)/(1-a0);
-      const z2_pred=aDt*z1+b0*u*bFac;
-      const da=dt*Math.pow(a0,dt-1);
-      const dz_da=da*z1+b0*u*(-da*(1-a0)+(1-aDt))/((1-a0)*(1-a0));
-      const dz_db=u*bFac;
-      g0=dz_da; g1=dz_db;
-      y_obs=z2-z2_pred+a0*dz_da+b0*dz_db;
-    }
-    const w=1/sv2;
-    GtG[0][0]+=g0*g0*w; GtG[0][1]+=g0*g1*w;
-    GtG[1][0]+=g1*g0*w; GtG[1][1]+=g1*g1*w;
-    GtY[0]+=g0*y_obs*w; GtY[1]+=g1*y_obs*w;
+    const A=[[GtG[0][0]+SpInv[0][0],GtG[0][1]+SpInv[0][1]],[GtG[1][0]+SpInv[1][0],GtG[1][1]+SpInv[1][1]]];
+    const rhs=[GtY[0]+SpInv[0][0]*a0+SpInv[0][1]*b0,GtY[1]+SpInv[1][0]*a0+SpInv[1][1]*b0];
+    const det=A[0][0]*A[1][1]-A[0][1]*A[1][0];
+    if(Math.abs(det)<1e-12) break;
+    const nextA=Math.max(0.50,Math.min(0.97,(rhs[0]*A[1][1]-rhs[1]*A[0][1])/det));
+    const nextB=Math.max(0.001,Math.min(0.50,(A[0][0]*rhs[1]-A[1][0]*rhs[0])/det));
+    cov=[[A[1][1]/det,-A[0][1]/det],[-A[1][0]/det,A[0][0]/det]];
+    if(Math.abs(nextA-a_hat)<1e-5&&Math.abs(nextB-b_hat)<1e-5){a_hat=nextA;b_hat=nextB;break;}
+    a_hat=nextA;b_hat=nextB;
   }
-  const A=[[GtG[0][0]+SpInv[0][0],GtG[0][1]+SpInv[0][1]],
-            [GtG[1][0]+SpInv[1][0],GtG[1][1]+SpInv[1][1]]];
-  const rhs=[GtY[0]+SpInv[0][0]*a0+SpInv[0][1]*b0,
-              GtY[1]+SpInv[1][0]*a0+SpInv[1][1]*b0];
-  const det=A[0][0]*A[1][1]-A[0][1]*A[1][0];
-  if(Math.abs(det)<1e-12) return {a:a0,b:b0,cov:[[0.07,0.0007],[0.0007,0.03]],n_obs};
-  const a_hat=Math.max(0.50,Math.min(0.97,(rhs[0]*A[1][1]-rhs[1]*A[0][1])/det));
-  const b_hat=Math.max(0.005,Math.min(0.50,(A[0][0]*rhs[1]-A[1][0]*rhs[0])/det));
-  const cov=[[A[1][1]/det,-A[0][1]/det],[-A[1][0]/det,A[0][0]/det]];
   return {a:a_hat,b:b_hat,cov,n_obs};
 }
-// (a,b) → (tau, keff) への変換
-// a = exp(-1/tau) ⟹ tau = -1/ln(a)
-// ssINR = baseINR + b/(1-a)*dose ⟹ keff*tau = b/(1-a) ⟹ keff = b/(tau*(1-a))
 function abToTauKeff(a,b){
   const tau=Math.max(2.5,Math.min(7.0,-1.0/Math.log(Math.max(0.01,a))));
   const keff=b/(tau*(1-a));
   return {tau,keff};
 }
+function carryoverDose(priorDose,nextDose,day){
+  const tauCarry=3.6;
+  return nextDose+(priorDose-nextDose)*Math.exp(-(day-1)/tauCarry);
+}
+function predictFutureINR(latestINR,baseINR,dose,a,b,days,priorDose=dose){
+  const vals=[];let z=latestINR-baseINR;
+  for(let d=1;d<=days;d++){
+    const effDose=carryoverDose(priorDose,dose,d);
+    z=predictZ(z,effDose,1,a,b);
+    vals.push(baseINR+z);
+  }
+  return vals;
+}
+function steadyStateINR(baseINR,dose,a,b){
+  const aSafe=Math.max(0.01,Math.min(0.999,a));
+  return baseINR + (b*dose)/(1-aSafe);
+}
+function chooseModelDose(latestINR,baseINR,tLow,tHigh,a,b,doseRef,priorDose=doseRef){
+  const tMid=(tLow+tHigh)/2;
+  const lambda=0.15;
+  let bestDose=0,bestScore=Infinity,bestTraj=[];
+  for(let dose=0;dose<=15;dose+=0.5){
+    const traj=predictFutureINR(latestINR,baseINR,dose,a,b,7,priorDose);
+    let score=lambda*Math.pow(dose-doseRef,2);
+    traj.forEach((pred,idx)=>{
+      const w=idx<2?1.6:1.0;
+      score+=w*Math.pow(pred-tMid,2);
+      if(pred>tHigh) score+=w*2.5*Math.pow(pred-tHigh,2);
+      if(pred>tHigh+1) score+=w*8*Math.pow(pred-(tHigh+1),2);
+      if(pred<tLow-0.5) score+=w*0.8*Math.pow((tLow-0.5)-pred,2);
+    });
+    const ss=steadyStateINR(baseINR,dose,a,b);
+    if(latestINR<tLow){
+      if(ss<tLow) score+=40*Math.pow(tLow-ss,2);
+      if(ss>tHigh) score+=12*Math.pow(ss-tHigh,2);
+    }else if(latestINR>tHigh){
+      if(ss>tHigh) score+=30*Math.pow(ss-tHigh,2);
+    }else{
+      if(ss>tHigh) score+=12*Math.pow(ss-tHigh,2);
+      if(ss<tLow) score+=4*Math.pow(tLow-ss,2);
+    }
+    if(score<bestScore){bestScore=score;bestDose=dose;bestTraj=traj;}
+  }
+  return {dose:bestDose,traj:bestTraj};
+}
+function assessInitStability(dosePts,inrPts,baseINR,latestINR,tLow,tHigh,doseRef,fit){
+  const pts=[...inrPts].filter(p=>p.inr!==null).sort((a,b)=>a.day-b.day);
+  const kin=abToTauKeff(fit.a,fit.b);
+  const sens=Math.max(0.4,Math.min(2.5,kin.keff/0.06));
+  const fullDose=chooseModelDose(latestINR,baseINR,tLow,tHigh,fit.a,fit.b,doseRef,doseRef).dose;
+  const omitTargets=pts.filter((p,idx)=>idx>0&&p.day!==pts[pts.length-1].day);
+  if(fit.n_obs<2||pts.length<3){
+    return {text:'推定安定性: 低（データ不足）',color:'var(--danger-text)',detail:'観測点が少ないため単一点除外での評価不可'};
+  }
+  if(!omitTargets.length){
+    return {text:fit.n_obs>=4?'推定安定性: 中':'推定安定性: 低',color:fit.n_obs>=4?'var(--warning-text)':'var(--danger-text)',detail:'単一点除外の評価対象が少ない'};
+  }
+  let maxShift=0,maxDoseShift=0,sumShift=0;
+  omitTargets.forEach(target=>{
+    const reducedPts=pts.filter(p=>p!==target);
+    const reducedFit=bayesianParams(dosePts,reducedPts,baseINR);
+    const reducedKin=abToTauKeff(reducedFit.a,reducedFit.b);
+    const reducedSens=Math.max(0.4,Math.min(2.5,reducedKin.keff/0.06));
+    const reducedDose=chooseModelDose(latestINR,baseINR,tLow,tHigh,reducedFit.a,reducedFit.b,doseRef,doseRef).dose;
+    const sensShift=Math.abs(reducedSens-sens)/Math.max(0.25,sens);
+    const tauShift=Math.abs(reducedKin.tau-kin.tau)/Math.max(0.75,kin.tau);
+    const shift=Math.max(sensShift,tauShift);
+    maxShift=Math.max(maxShift,shift);
+    maxDoseShift=Math.max(maxDoseShift,Math.abs(reducedDose-fullDose));
+    sumShift+=shift;
+  });
+  const meanShift=sumShift/omitTargets.length;
+  if(fit.n_obs>=4&&maxShift<0.2&&maxDoseShift<=0.5){
+    return {text:'推定安定性: 高',color:'var(--success-text)',detail:`1点除外時の変動 小（平均 ${(meanShift*100).toFixed(0)}%）`};
+  }
+  if(fit.n_obs>=3&&maxShift<0.45&&maxDoseShift<=1.0){
+    return {text:'推定安定性: 中',color:'var(--warning-text)',detail:`1点除外時の変動 中（最大 ${(maxShift*100).toFixed(0)}%）`};
+  }
+  return {text:'推定安定性: 低',color:'var(--danger-text)',detail:`1点除外で変動 大（最大 ${(maxShift*100).toFixed(0)}%）`};
+}
 // ── パラメータバー描画 ────────────────────────────────────────
-function renderParamBars(a_hat,b_hat,tau,keff,covPost,n_obs){
+function renderParamBars(sens,tau,stability){
   const el=document.getElementById('i-param-bars');
   if(!el)return;
+  const confTxt=stability?.text||'推定安定性: 低';
+  const confClr=stability?.color||'var(--danger-text)';
+  const confDetail=stability?.detail||'';
 
-  const sig_a=Math.sqrt(Math.max(0,covPost[0][0]));
-  const sig_b=Math.sqrt(Math.max(0,covPost[1][1]));
-  const cov_ab=covPost[0][1];
-
-  // sens CI: keff*τ = b/(1-a) ベースで計算後クランプ空間に射影
-  const keffTau=b_hat/(1-a_hat);
-  const dkT_da=b_hat/((1-a_hat)**2);
-  const dkT_db=1/(1-a_hat);
-  const sig_keffTau=Math.sqrt(dkT_da**2*sig_a**2+dkT_db**2*sig_b**2+2*dkT_da*dkT_db*cov_ab);
-  const sens_raw=keffTau/(0.06*tau);
-  const sens=Math.max(0.4,Math.min(2.5,sens_raw));
-  const sensHiBound=sens_raw>=2.5;
-  const sensLoBound=sens_raw<=0.4;
-  const sig_keff_norm=sig_keffTau/(0.06*tau);
-  const sens_lo=Math.max(0.4,Math.min(2.5,sens_raw-sig_keff_norm));
-  const sens_hi=Math.max(0.4,Math.min(2.5,sens_raw+sig_keff_norm));
-
-  // τ CI: 境界クランプ時は非対称（片側のみ）
-  const lna=Math.log(Math.max(0.001,a_hat));
-  const tau_raw=-1/lna;
-  const tauHiBound=tau_raw>7.0;
-  const tauLoBound=tau_raw<2.5;
-  let tau_ci_lo,tau_ci_hi;
-  if(tauHiBound){
-    const a_lo=Math.max(0.50,a_hat-sig_a);
-    tau_ci_lo=Math.max(2.5,Math.min(7.0,-1/Math.log(Math.max(0.001,a_lo))));
-    tau_ci_hi=7.0;
-  }else if(tauLoBound){
-    const a_hi=Math.min(0.97,a_hat+sig_a);
-    tau_ci_lo=2.5;
-    tau_ci_hi=Math.max(2.5,Math.min(7.0,-1/Math.log(Math.max(0.001,a_hi))));
-  }else{
-    const dtau_da=1/(a_hat*lna*lna);
-    const s=Math.abs(dtau_da)*sig_a;
-    tau_ci_lo=Math.max(2.5,tau-s);
-    tau_ci_hi=Math.min(7.0,tau+s);
-  }
-
-  // 推定精度ラベル（観測ペア数ベース）
-  const confTxt=n_obs>=4?'推定精度: 高':n_obs>=2?'推定精度: 中':'推定精度: 低（データ不足）';
-  const confClr=n_obs>=4?'var(--success-text)':n_obs>=2?'var(--warning-text)':'var(--danger-text)';
-
-  function makeBar(name,valDisp,prefix,ci_lo,ci_hi,minV,maxV,zones,unit){
-    const pct=v=>Math.max(0,Math.min(100,(v-minV)/(maxV-minV)*100));
-    const lo=pct(ci_lo),hi=pct(ci_hi),mid=pct(valDisp);
+  function makeBar(name,valDisp,minV,maxV,zones,summary,rawText){
+    const pct=v=>Math.max(0,Math.min(100,(Math.max(minV,Math.min(maxV,v))-minV)/(maxV-minV)*100));
+    const mid=pct(valDisp);
     const dark=document.documentElement.getAttribute('data-theme')==='dark';
     const zoneHtml=zones.map(z=>{
       const l=pct(z.from),w=pct(z.to)-l;
@@ -630,7 +687,7 @@ function renderParamBars(a_hat,b_hat,tau,keff,covPost,n_obs){
     return `<div class="pb-wrap">
       <div class="pb-header">
         <span class="pb-name">${name}</span>
-        <span><span class="pb-val">${prefix}${valDisp.toFixed(2)}<span style="font-size:11px;font-weight:400;color:var(--text2);margin-left:2px;">${unit}</span></span><span class="pb-ci-lbl" style="color:${confClr};margin-left:6px;">${confTxt}</span></span>
+        <span><span class="pb-val">${summary}<span style="font-size:11px;font-weight:400;color:var(--text2);margin-left:6px;">${rawText}</span></span><span class="pb-ci-lbl" style="color:${confClr};margin-left:6px;">${confTxt}</span></span>
       </div>
       <div class="pb-track">
         <div style="position:absolute;inset:0;border-radius:5px;overflow:hidden;">${zoneHtml}</div>
@@ -642,19 +699,22 @@ function renderParamBars(a_hat,b_hat,tau,keff,covPost,n_obs){
   }
 
   const sensZones=[
-    {from:0.4,to:0.7,c:'rgba(34,197,94,0.13)',dc:'rgba(34,197,94,0.2)',label:'低感受性'},
+    {from:0.4,to:0.7,c:'rgba(249,115,22,0.13)',dc:'rgba(249,115,22,0.2)',label:'低い'},
     {from:0.7,to:1.3,c:'rgba(59,130,246,0.10)',dc:'rgba(59,130,246,0.18)',label:'標準'},
-    {from:1.3,to:2.5,c:'rgba(249,115,22,0.13)',dc:'rgba(249,115,22,0.2)',label:'高感受性'},
+    {from:1.3,to:2.5,c:'rgba(34,197,94,0.13)',dc:'rgba(34,197,94,0.2)',label:'高い'},
   ];
   const tauZones=[
-    {from:2.5,to:3.8,c:'rgba(249,115,22,0.13)',dc:'rgba(249,115,22,0.2)',label:'速収束'},
+    {from:2.5,to:3.8,c:'rgba(34,197,94,0.13)',dc:'rgba(34,197,94,0.2)',label:'速い'},
     {from:3.8,to:5.5,c:'rgba(59,130,246,0.10)',dc:'rgba(59,130,246,0.18)',label:'標準'},
-    {from:5.5,to:7.0,c:'rgba(139,92,246,0.13)',dc:'rgba(139,92,246,0.2)',label:'遅収束'},
+    {from:5.5,to:7.0,c:'rgba(249,115,22,0.13)',dc:'rgba(249,115,22,0.2)',label:'遅い'},
   ];
+  const sensSummary=sens<0.7?'低い':sens<1.3?'標準':'高い';
+  const tauSummary=tau<3.8?'速い':tau<5.5?'標準':'遅い';
 
   el.innerHTML=
-    makeBar('感受性（sens）',sens,sensHiBound?'≥':sensLoBound?'≤':'',sens_lo,sens_hi,0.4,2.5,sensZones,'')+
-    makeBar('時定数（τ）',tau,tauHiBound?'≥':tauLoBound?'≤':'',tau_ci_lo,tau_ci_hi,2.5,7.0,tauZones,'日');
+    makeBar('薬効感受性',sens,0.4,2.5,sensZones,sensSummary,`内部 sens ${sens.toFixed(2)}`)+
+    makeBar('反応の遅さ',tau,2.5,7.0,tauZones,tauSummary,`内部 τ ${tau.toFixed(1)} 日`)+
+    `<div style="font-size:10px;color:var(--text3);margin-top:-4px;">${confDetail}</div>`;
 }
 function calcIWPCJapan(age,height,weight,cyp,bleed,amiodarone,sex){
   // IWPC基本式（Klein et al. NEJM 2009）
@@ -709,7 +769,7 @@ function updateIWPCEstimate(){
   document.getElementById('i-iwpc-adj-note').textContent=`[${notes.join('・')}]`;
 }
 
-let latestINRGlobal=1.1, avgDoseGlobal=5.0;
+let latestINRGlobal=1.1, avgDoseGlobal=5.0, priorDoseGlobal=5.0;
 let lastTTRInit=null, lastTTRStable=null;
 
 const isDark=()=>matchMedia('(prefers-color-scheme: dark)').matches;
@@ -752,23 +812,74 @@ function renderTTR(val,valEl,labelEl,cardEl){
   labelEl.textContent=val>=70?'良好（≥70%）':val>=60?'許容範囲（60–70%）':'要改善（<60%）';
 }
 
-// ── スケジュール予測軌跡（区分的指数モデル）────────────────
-function buildScheduleTrajectory(lastDay,latestINR,schedule,avgDose,tau,keff,labels,baseINR){
+function recommendFollowUpInterval(latestINR,tLow,tHigh,traj,lastDay){
+  if(!traj.length) return 3;
+  const risingFast=(traj[0]-latestINR)>0.3||(traj[1]-latestINR)>0.5;
+  if(lastDay<=7){
+    if(latestINR>tHigh||risingFast) return 2;
+    return 3;
+  }
+  if(lastDay<=14&&risingFast) return 3;
+  if(latestINR>tHigh+1) return 1;
+  if(traj[0]>tHigh+0.5||traj[1]>tHigh+0.5) return 2;
+  if(latestINR<tLow){
+    const enterDay=traj.findIndex(v=>v>=tLow&&v<=tHigh);
+    if(enterDay>=0) return Math.max(2,Math.min(4,enterDay+1));
+    return 3;
+  }
+  if(latestINR>=tLow&&latestINR<=tHigh){
+    const firstOut=traj.findIndex(v=>v<tLow||v>tHigh);
+    if(firstOut===-1) return 7;
+    if(firstOut>=4) return 5;
+  }
+  return 3;
+}
+
+// ── スケジュール予測軌跡 ──────────────────────────────────
+function buildScheduleTrajectory(lastDay,latestINR,schedule,labels,baseINR,a,b,priorDose){
   if(!schedule||!schedule.length)return labels.map(()=>null);
-  // tau と keff は呼び出し元から直接受け取る（Bayesian 推定値）
-  // アンカー：各スケジュール確認日の (day, inr, 以後の用量)
-  const anchors=[{day:lastDay,inr:latestINR,dose:schedule[0].dose}];
-  for(const s of schedule) anchors.push({day:s.day,inr:s.projINR,dose:s.nextDose});
+  const endDay=schedule[schedule.length-1].day;
+  const days=Math.max(0,labels[labels.length-1]-lastDay);
+  const future=predictFutureINR(latestINR,baseINR,schedule[0].dose,a,b,days,priorDose);
   return labels.map(d=>{
-    if(d<lastDay)return null;
-    let anchor=null;
-    for(let i=anchors.length-1;i>=0;i--){if(anchors[i].day<=d){anchor=anchors[i];break;}}
-    if(!anchor)return null;
-    const el=d-anchor.day;
-    // 正しい定常状態INR：ベースINR + 投与量 × 感受性係数 × 時定数
-    const ssINR=Math.max(0.8,baseINR+anchor.dose*keff*tau);
-    return parseFloat(Math.max(0.8,Math.min(8,ssINR+(anchor.inr-ssINR)*Math.exp(-el/tau))).toFixed(2));
+    if(d<lastDay||d>endDay)return null;
+    if(d===lastDay)return parseFloat(latestINR.toFixed(2));
+    const idx=d-lastDay-1;
+    return idx>=0&&idx<future.length?parseFloat(Math.max(0.8,Math.min(8,future[idx])).toFixed(2)):null;
   });
+}
+function buildPredictionBand(lastDay,latestINR,schedule,labels,baseINR,a,b,priorDose,dosePts,inrPts){
+  if(!schedule||!schedule.length)return {lower:labels.map(()=>null),upper:labels.map(()=>null)};
+  const endDay=schedule[schedule.length-1].day;
+  const days=Math.max(0,labels[labels.length-1]-lastDay);
+  const pts=[...inrPts].filter(p=>p.inr!==null).sort((x,y)=>x.day-y.day);
+  const omitTargets=pts.filter((p,idx)=>idx>0&&p.day!==pts[pts.length-1].day);
+  if(pts.length<3||!omitTargets.length)return {lower:labels.map(()=>null),upper:labels.map(()=>null)};
+  const scenarios=[predictFutureINR(latestINR,baseINR,schedule[0].dose,a,b,days,priorDose)];
+  omitTargets.forEach(target=>{
+    const reducedPts=pts.filter(p=>p!==target);
+    const reducedFit=bayesianParams(dosePts,reducedPts,baseINR);
+    scenarios.push(predictFutureINR(latestINR,baseINR,schedule[0].dose,reducedFit.a,reducedFit.b,days,priorDose));
+  });
+  const lower=labels.map(d=>{
+    if(d<lastDay||d>endDay)return null;
+    if(d===lastDay)return parseFloat(latestINR.toFixed(2));
+    const idx=d-lastDay-1;
+    if(idx<0||idx>=days)return null;
+    const vals=scenarios.map(s=>s[idx]).filter(Number.isFinite);
+    if(!vals.length)return null;
+    return parseFloat(Math.max(0.8,Math.min(8,Math.min(...vals))).toFixed(2));
+  });
+  const upper=labels.map(d=>{
+    if(d<lastDay||d>endDay)return null;
+    if(d===lastDay)return parseFloat(latestINR.toFixed(2));
+    const idx=d-lastDay-1;
+    if(idx<0||idx>=days)return null;
+    const vals=scenarios.map(s=>s[idx]).filter(Number.isFinite);
+    if(!vals.length)return null;
+    return parseFloat(Math.max(0.8,Math.min(8,Math.max(...vals))).toFixed(2));
+  });
+  return {lower,upper};
 }
 
 // ── スケジュール予測投与量（各日の予測投与量） ─────────────
@@ -777,8 +888,9 @@ function buildProjectedDoses(firstProjDay,schedule,labels){
   // 投与量未記録の当日（lastDayHasDose=false）はその日から予測を開始
   // 投与量記録済みの場合は翌日（lastDay+1）から開始
   if(!schedule||!schedule.length)return labels.map(()=>null);
+  const endDay=schedule[schedule.length-1].day;
   return labels.map(d=>{
-    if(d<firstProjDay)return null;
+    if(d<firstProjDay||d>endDay)return null;
     let prev=firstProjDay-1;
     for(const s of schedule){if(d>prev&&d<=s.day)return s.dose;prev=s.day;}
     return schedule[schedule.length-1].nextDose;
@@ -802,7 +914,7 @@ function getCurrentData(){
       startDate:document.getElementById('i-startDate').value,
       patientName:document.getElementById('i-patientName').value,
       patientId:document.getElementById('i-patientId').value,
-      log:getLog()
+      log:getLog().map(({day,inr,dose,memo})=>({day,inr,dose,memo}))
     },
     stable:{
       curINR:document.getElementById('s-curINR').value,
@@ -842,7 +954,7 @@ function applyData(data){
         const tb=document.getElementById('i-logBody');tb.innerHTML='';
         ini.log.forEach(row=>{
           const tr=document.createElement('tr');
-          tr.innerHTML=`<td><input type="number" step="1" min="0" value="${row.day??''}" class="log-day" oninput="updateLogDateHints()"/></td><td><span class="date-hint log-date-hint">—</span></td><td><input type="number" step="0.1" min="0.5" max="10" value="${row.inr??''}" class="log-inr" placeholder="—"/></td><td><input type="number" step="0.5" min="0" max="20" value="${row.dose??''}" class="log-dose" placeholder="mg"/></td><td><input type="text" value="${row.memo??''}" class="log-memo"/></td><td><button class="del-btn" onclick="removeLogRow(this)">×</button></td>`;
+          tr.innerHTML=buildLogRowHTML(row);
           tb.appendChild(tr);
         });
         updateLogDateHints();
@@ -870,16 +982,40 @@ function applyData(data){
 function loadData(){
   try{const raw=localStorage.getItem('warfarin_tool_v2');if(raw)applyData(JSON.parse(raw));}catch(e){}
 }
+function resetResultDisplays(){
+  document.getElementById('i-result').style.display='none';
+  document.getElementById('i-res-inr').textContent='—';
+  document.getElementById('i-res-rec').textContent='—';
+  document.getElementById('i-res-eta').textContent='—';
+  document.getElementById('i-res-ttr').textContent='—';
+  document.getElementById('i-ttr-label').textContent='';
+  document.getElementById('i-ttr-card').style.display='none';
+  document.getElementById('i-param-bars').innerHTML='';
+  document.getElementById('i-res-detail').textContent='';
+  document.getElementById('i-res-warn').style.display='none';
+  document.getElementById('i-res-warn').textContent='';
+  document.getElementById('i-schedule').innerHTML='';
+  document.getElementById('i-legend').innerHTML='';
+  if(iChart){iChart.destroy();iChart=null;}
+
+  document.getElementById('s-result').style.display='none';
+  document.getElementById('s-res-cur').textContent='—';
+  document.getElementById('s-res-weekly').textContent='—';
+  document.getElementById('s-res-change').textContent='—';
+  document.getElementById('s-res-ttr').textContent='—';
+  document.getElementById('s-ttr-label').textContent='';
+  document.getElementById('s-ttr-card').style.display='none';
+  document.getElementById('s-res-badge').innerHTML='';
+  document.getElementById('s-res-detail').textContent='';
+  document.getElementById('s-res-warn').style.display='none';
+  document.getElementById('s-res-warn').textContent='';
+  document.getElementById('s-recGrid').innerHTML='';
+  document.getElementById('s-legend').innerHTML='';
+  if(sChart){sChart.destroy();sChart=null;}
+}
 // ログテーブルを初期の1行空白に戻す
 function resetLogTable(){
-  document.getElementById('i-logBody').innerHTML=`<tr>
-    <td><input type="number" step="1" min="0" value="0" class="log-day" oninput="updateLogDateHints()"/></td>
-    <td><span class="date-hint log-date-hint">—</span></td>
-    <td><input type="number" step="0.1" min="0.5" max="10" placeholder="—" class="log-inr"/></td>
-    <td><input type="number" step="0.5" min="0" max="20" placeholder="5.0" class="log-dose"/></td>
-    <td><input type="text" placeholder="開始日" class="log-memo"/></td>
-    <td><button class="del-btn" onclick="removeLogRow(this)">×</button></td>
-  </tr>`;
+  document.getElementById('i-logBody').innerHTML=`<tr>${buildLogRowHTML({day:0,memo:''})}</tr>`;
 }
 // 全フォームをデフォルト値にリセット
 function resetAllForms(){
@@ -895,8 +1031,7 @@ function resetAllForms(){
   document.getElementById('i-amiodarone').value='0';
   document.getElementById('i-sex').value='male';
   resetLogTable();
-  document.getElementById('i-result').style.display='none';
-  if(iChart){iChart.destroy();iChart=null;}
+  resetResultDisplays();
   document.getElementById('s-curINR').value='1.8';
   document.getElementById('s-tLow').value='2.0';
   document.getElementById('s-tHigh').value='3.0';
@@ -906,8 +1041,6 @@ function resetAllForms(){
   document.getElementById('s-historyRows').innerHTML='';
   sHist=0;
   addStableRow();
-  document.getElementById('s-result').style.display='none';
-  if(sChart){sChart.destroy();sChart=null;}
   updateLogDateHints();
 }
 function clearData(){
@@ -925,8 +1058,7 @@ function newPatient(){
   if(!confirm('新規患者として登録しますか？\n患者名・開始日・投与記録がクリアされます。'))return;
   ['i-patientId','i-patientName','i-startDate'].forEach(id=>document.getElementById(id).value='');
   resetLogTable();
-  document.getElementById('i-result').style.display='none';
-  if(iChart){iChart.destroy();iChart=null;}
+  resetResultDisplays();
   updateLogDateHints();
 }
 function saveToHistory(tab,stats){
@@ -1004,6 +1136,7 @@ function restoreFromHistory(i){
   try{hist=JSON.parse(localStorage.getItem('warfarin_history_v2')||'[]');}catch(e){}
   if(!hist[i])return;
   if(!confirm('現在の入力を上書きして復元しますか？'))return;
+  resetResultDisplays();
   applyData(hist[i].data);
   toggleHistoryPanel();
   switchTab(hist[i].tab||'init');
@@ -1036,10 +1169,22 @@ function updateIndication(){
 // ── ログ操作 ────────────────────────────────────────────────
 function addLogRow(){
   const tb=document.getElementById('i-logBody'),tr=document.createElement('tr');
-  tr.innerHTML=`<td><input type="number" step="1" min="0" placeholder="日数" class="log-day" oninput="updateLogDateHints()"/></td><td><span class="date-hint log-date-hint">—</span></td><td><input type="number" step="0.1" min="0.5" max="10" placeholder="—" class="log-inr"/></td><td><input type="number" step="0.5" min="0" max="20" placeholder="mg" class="log-dose"/></td><td><input type="text" placeholder="" class="log-memo"/></td><td><button class="del-btn" onclick="removeLogRow(this)">×</button></td>`;
+  tr.innerHTML=buildLogRowHTML();
   tb.appendChild(tr);updateLogDateHints();
 }
 function removeLogRow(btn){const r=btn.closest('tr');if(document.getElementById('i-logBody').rows.length>1)r.remove();}
+function buildLogRowHTML(row={}){
+  const checked=row.enabled===false?'':'checked';
+  const day=row.day??'';
+  const inr=row.inr??'';
+  const dose=row.dose??'';
+  const memo=row.memo??'';
+  return `<td class="log-enable-cell"><input type="checkbox" class="log-enable" ${checked} onchange="updateLogRowEnabledState(this)"/></td><td><input type="number" step="1" min="0" value="${day}" placeholder="日数" class="log-day" oninput="updateLogDateHints()"/></td><td><span class="date-hint log-date-hint">—</span></td><td><input type="number" step="0.1" min="0.5" max="10" value="${inr}" class="log-inr" placeholder="—"/></td><td><input type="number" step="0.5" min="0" max="20" value="${dose}" class="log-dose" placeholder="mg"/></td><td><input type="text" value="${memo}" placeholder="" class="log-memo"/></td><td><button class="del-btn" onclick="removeLogRow(this)">×</button></td>`;
+}
+function updateLogRowEnabledState(el){
+  const row=el.closest('tr');
+  if(row) row.classList.toggle('log-row-disabled',!el.checked);
+}
 // 指定日以前の最新記録投与量を返す（空白日は直前投与量を継続とみなす）
 function effectiveDose(dosePts,day){
   const prior=dosePts.filter(p=>p.day<=day);
@@ -1048,11 +1193,12 @@ function effectiveDose(dosePts,day){
 function getLog(){
   const rows=document.getElementById('i-logBody').rows,pts=[];
   for(const r of rows){
-    const d=parseFloat(r.cells[0].querySelector('input').value);
-    const inr=parseFloat(r.cells[2].querySelector('input').value);
-    const dose=parseFloat(r.cells[3].querySelector('input').value);
-    const memo=r.cells[4].querySelector('input').value;
-    if(!isNaN(d))pts.push({day:d,inr:isNaN(inr)?null:inr,dose:isNaN(dose)?null:dose,memo});
+    const d=parseFloat(r.querySelector('.log-day')?.value);
+    const inr=parseFloat(r.querySelector('.log-inr')?.value);
+    const dose=parseFloat(r.querySelector('.log-dose')?.value);
+    const memo=r.querySelector('.log-memo')?.value||'';
+    const enabled=!!r.querySelector('.log-enable')?.checked;
+    if(!isNaN(d))pts.push({day:d,inr:isNaN(inr)?null:inr,dose:isNaN(dose)?null:dose,memo,enabled});
   }
   return pts.sort((a,b)=>a.day-b.day);
 }
@@ -1069,8 +1215,13 @@ function calcInit(){
   const startDate=document.getElementById('i-startDate').value;
   const indication=document.getElementById('i-indication').value;
   const log=getLog();
-  const inrPts=log.filter(p=>p.inr!==null);
-  const dosePts=log.filter(p=>p.dose!==null);
+  const activeLog=log.filter(p=>p.enabled!==false);
+  const inrPts=activeLog.filter(p=>p.inr!==null);
+  const dosePts=activeLog.filter(p=>p.dose!==null);
+  if(!inrPts.length){
+    alert('解析に使うINR行を1行以上チェックしてください。');
+    return;
+  }
   const baseEntry=inrPts.find(p=>p.day===0)||inrPts[0];
   const baseINR=baseEntry?baseEntry.inr:1.1;
   const latestPt=inrPts[inrPts.length-1]||{inr:baseINR,day:0};
@@ -1098,78 +1249,50 @@ function calcInit(){
   const avgDose=lastDayHasDose?lastDayDoseEntered:histAvgDose;
   avgDoseGlobal=avgDose;
 
-  // Bayesian MAP 推定（Faggionato et al. IEEE TBME 2023）
-  // モデル: INR(k+1) - baseINR = a*(INR(k)-baseINR) + b*dose(k)
-  // 事前分布: a₀=0.84, b₀=0.05（集団平均値）
-  const {a:a_hat,b:b_hat,cov:covPost,n_obs:n_obs_bay}=bayesianParams(dosePts,inrPts,baseINR);
+  const {a:a_hat,b:b_hat,n_obs}=bayesianParams(dosePts,inrPts,baseINR);
   const {tau:tau_bay,keff:keff_bay}=abToTauKeff(a_hat,b_hat);
-  // 表示用感受性係数（互換性のため保持）
   const sens=Math.max(0.4,Math.min(2.5,keff_bay/0.06));
+  priorDoseGlobal=histAvgDose;
 
-  // 推奨投与量：Bayesian 推定 (a_hat, b_hat) から定常状態INRを算出
-  // ssINR = baseINR + b/(1-a) * dose  （論文 Eq.2 の定常状態）
-
-  // doseRef：推奨計算の「調整起点」となる用量
-  // 今夜の投与量（avgDose）が何であれ、常に histAvgDose を基準にする。
-  // 「現在のINRを生み出した用量」から増減を判断するのが正しいモデル。
-  // 0mg・1mgなど例外的に低い入力でも Math.min(avgDose-0.5,…) による底打ちを防ぐ。
   const doseRef=histAvgDose;
-
-  let recDose;
-  // ssAtAvg：histAvgDose（当日朝のINRを生み出した投与量）で定常状態を評価
-  const ssAtAvg=baseINR+b_hat/(1-a_hat)*histAvgDose;
-  if(ssAtAvg<tLow){
-    // 現投与量では定常状態でも目標未達
-    const doseTgt=Math.max(0.5,(tMid-baseINR)*(1-a_hat)/b_hat);
-    const cappedTgt=Math.min(doseTgt,doseRef*1.25);
-    recDose=Math.max(doseRef+0.5,Math.round(cappedTgt*2)/2);
-  }else if(ssAtAvg>tHigh){
-    // 現投与量では定常状態で目標超過
-    const doseTgt=Math.max(0.5,(tMid-baseINR)*(1-a_hat)/b_hat);
-    // INRが既に目標域（>= tLow）に到達している場合：80%キャップを外し doseTgt へ積極的に移行
-    // INRがまだ上昇中（< tLow）の場合：急激な減量を避けるため80%キャップを維持
-    const cappedTgt=latestINRGlobal>=tLow?doseTgt:Math.max(doseTgt,doseRef*0.80);
-    recDose=Math.min(doseRef-0.5,Math.round(cappedTgt*2)/2);
-    recDose=Math.max(0.5,recDose);
-  }else{
-    // 定常状態INRは目標内 → 現在INRに応じた微調整
-    if(latestINRGlobal<tLow)recDose=Math.max(doseRef+0.5,Math.round(doseRef*1.10*2)/2);
-    else if(latestINRGlobal>tHigh)recDose=Math.min(doseRef-0.5,Math.round(doseRef*0.90*2)/2);
-    else recDose=doseRef;
-    recDose=Math.max(0.5,recDose);
-  }
+  const {dose:recDose,traj:initTraj}=chooseModelDose(latestINRGlobal,baseINR,tLow,tHigh,a_hat,b_hat,doseRef,histAvgDose);
+  const stability=assessInitStability(dosePts,inrPts,baseINR,latestINRGlobal,tLow,tHigh,doseRef,{a:a_hat,b:b_hat,n_obs});
 
   const gap=tMid-latestINRGlobal;
-  const eta=gap>0?Math.max(1,Math.round(gap/(doseRef*keff_bay))):0;
+  const etaIdx=initTraj.findIndex(v=>v>=tLow&&v<=tHigh);
+  const eta=etaIdx>=0?etaIdx+1:(gap>0?30:0);
   const ttr=calcTTR(inrPts,tLow,tHigh);
   lastTTRInit=ttr;
   renderTTR(ttr,document.getElementById('i-res-ttr'),document.getElementById('i-ttr-label'),document.getElementById('i-ttr-card'));
 
-  const schedule=buildSchedule(lastDay,latestINRGlobal,tLow,tHigh,tMid,recDose,tau_bay,keff_bay,avgDose,baseINR);
+  const schedule=buildSchedule(lastDay,latestINRGlobal,tLow,tHigh,tMid,recDose,baseINR,a_hat,b_hat,histAvgDose);
 
   document.getElementById('i-res-inr').textContent=latestINRGlobal.toFixed(1);
   document.getElementById('i-res-rec').textContent=recDose.toFixed(1);
   document.getElementById('i-res-eta').textContent=(latestINRGlobal>=tLow&&latestINRGlobal<=tHigh)?'—':Math.min(30,eta);
 
   const avgDoseDisp=lastDayHasDose&&avgDose<0.5?`${avgDose.toFixed(1)} mg/日（本日休薬、直近平均 ${histAvgDose.toFixed(1)} mg/日）`:histAvgDose.toFixed(1)+' mg/日';
+  const sensitivitySummary=sens<0.7?'低い':sens<1.3?'標準':'高い';
+  const tauSummary=tau_bay<3.8?'速い':tau_bay<5.5?'標準':'遅い';
   let det=`最終INR ${latestINRGlobal.toFixed(1)}（${lastDay}日目）。直近平均投与量 ${avgDoseDisp}（日本人補正推定週用量：${weeklyJP.toFixed(1)} mg/週、IWPC原値：${weeklyIWPC.toFixed(1)} mg/週）。`;
-  det+=`Bayesian推定パラメータ: a=${a_hat.toFixed(3)}, b=${b_hat.toFixed(4)}（τ=${tau_bay.toFixed(1)}日）。`;
-  det+=sens>1.3?'感受性が高め（低代謝傾向）。慎重な増量を推奨。':sens<0.7?'感受性が低め（速代謝傾向）。増量余地あり。':'感受性は標準的な範囲。';
+  det+=` 薬効感受性は${sensitivitySummary}、反応の遅さは${tauSummary}と推定。`;
+  det+=` （内部パラメータ: a=${a_hat.toFixed(3)}, b=${b_hat.toFixed(3)}, τ=${tau_bay.toFixed(1)} 日）`;
+  det+=` 直前用量の残効を持ち越して7日先まで予測し、目標域に最も近づく用量を0.5 mg刻みで選択。`;
   document.getElementById('i-res-detail').textContent=det;
 
   const wEl=document.getElementById('i-res-warn');
   const warns=[];
   if(latestINRGlobal>tHigh+1)warns.push('INRが大幅超過。出血リスク評価および一時休薬を検討。');
   if(latestINRGlobal<1.1&&lastDay>=5)warns.push('5日以降もINRが低値。吸収不良・相互作用・アドヒアランスを確認。');
-  if(age>=80&&sens>1.2)warns.push('高齢＋高感受性。次回測定を2〜3日後に前倒し推奨。');
+  if(age>=80&&sens>1.2)warns.push('高齢かつ薬効感受性が高め。次回測定を2〜3日後に前倒し推奨。');
   if(age>=70&&histAvgDose>3.5)warns.push('70歳以上では3.5mg/日超は過剰抗凝固リスクあり（Garcia et al.）。慎重なモニタリングを推奨。');
   if(age>=80&&histAvgDose>2.5)warns.push('80歳以上では2.5mg/日超は高リスク。出血・腎機能を再評価。');
   wEl.style.display=warns.length?'':'none';
   wEl.textContent=warns.join(' / ');
 
-  renderParamBars(a_hat,b_hat,tau_bay,keff_bay,covPost,n_obs_bay);
+  renderParamBars(sens,tau_bay,stability);
   renderSchedule(schedule,startDate,lastDay,lastDayHasDose);
-  buildInitChart(log,inrPts,lastDay,tLow,tHigh,tau_bay,keff_bay,avgDose,startDate,schedule,baseINR,lastDayHasDose);
+  buildInitChart(log,inrPts,lastDay,tLow,tHigh,avgDose,startDate,schedule,baseINR,lastDayHasDose,a_hat,b_hat,histAvgDose,dosePts);
   document.getElementById('i-result').style.display='';
 
   saveData();
@@ -1177,65 +1300,24 @@ function calcInit(){
   saveToHistory('init',{inr:latestINRGlobal,dose:avgDose,ttr,tLow,tHigh,indication,patientName,startDate});
 }
 
-function buildSchedule(lastDay,latestINR,tLow,tHigh,tMid,recDose,tau,keff,avgDose,baseINR){
-  const sched=[];// tau と keff は呼び出し元から直接受け取る（Bayesian 推定値）
-  let anchorDay=lastDay,anchorINR=latestINR,curDose=recDose;
-  for(let iter=0;iter<10&&anchorDay<=lastDay+28;iter++){
-    const ssINR=Math.max(0.8,baseINR+curDose*keff*tau);
-    const projAt=el=>Math.max(0.8,Math.min(8,ssINR+(anchorINR-ssINR)*Math.exp(-el/tau)));
-    const est3=projAt(3);
-    let interval,note,nextDose=curDose;
+function buildSchedule(lastDay,latestINR,tLow,tHigh,tMid,recDose,baseINR,a,b,priorDose){
+  const traj=predictFutureINR(latestINR,baseINR,recDose,a,b,7,priorDose);
+  const interval=recommendFollowUpInterval(latestINR,tLow,tHigh,traj,lastDay);
+  const checkINR=traj[Math.max(0,Math.min(traj.length-1,interval-1))];
+  let note;
+  if(latestINR>tHigh+1) note=`大幅超過 → ${recDose<0.25?'休薬':recDose.toFixed(1)+' mg/日'}、翌日再検`;
+  else if(latestINR>tHigh) note=`目標超過 → ${recDose<0.25?'休薬':recDose.toFixed(1)+' mg/日'}へ調整`;
+  else if(latestINR<tLow) note=`目標未満 → ${recDose<0.25?'休薬':recDose.toFixed(1)+' mg/日'}へ調整`;
+  else note=`目標範囲内 → ${recDose<0.25?'休薬':recDose.toFixed(1)+' mg/日'}で維持`;
 
-    if(anchorINR>tHigh+1){
-      // 緊急：大幅超過。翌日再検・大幅減量
-      interval=1;
-      nextDose=Math.min(curDose-0.5,Math.round(curDose*0.70*2)/2);
-      note=`大幅超過 → ${nextDose.toFixed(1)} mg/日に減量、翌日再検`;
-
-    }else if(ssINR>tHigh){
-      // 定常状態が目標超過 → 減量
-      // anchorINRが既に目標域内の場合：80%キャップを外し doseTgt へ積極的に移行（過延長防止）
-      // anchorINRがまだ目標未満の場合：急激な変化を避けるため80%キャップを維持
-      const doseTgt=Math.max(0.5,(tMid-baseINR)/(keff*tau));
-      const cappedTgt=anchorINR>=tLow?doseTgt:Math.max(doseTgt,curDose*0.80);
-      nextDose=Math.min(curDose-0.5,Math.round(cappedTgt*2)/2);
-      nextDose=Math.max(0.5,nextDose);
-      interval=ssINR>tHigh+0.5?2:3;
-      note=`目標超過 → ${nextDose.toFixed(1)} mg/日に減量`;
-
-    }else if(ssINR<tLow){
-      // 定常状態が目標未満 → 根本的用量不足。目標定常状態用量に向けて増量（最大25%、最低0.5mg増）
-      const doseTgt=(tMid-baseINR)/(keff*tau);
-      const cappedTgt=Math.min(doseTgt,curDose*1.25);
-      nextDose=Math.max(curDose+0.5,Math.round(cappedTgt*2)/2);
-      interval=est3<tLow-0.5?2:3;
-      note=`用量不足 → ${nextDose.toFixed(1)} mg/日に増量`;
-
-    }else if(est3<tLow){
-      // 定常状態は目標内だが収束途中（まだ低値） → 少量増量で収束加速（最低0.5mg増）
-      nextDose=Math.max(curDose+0.5,Math.round(curDose*1.10*2)/2);
-      interval=3;
-      note=`目標未満（収束中） → ${nextDose.toFixed(1)} mg/日に増量`;
-
-    }else{
-      // 目標範囲内または超過傾向
-      const nInRange=sched.filter(s=>s.inRange).length;
-      if(nInRange===0){interval=3;note='目標範囲内 → 現行維持、3日後確認';}
-      else if(nInRange<=1){interval=5;note='目標範囲内 → 現行維持、5日後確認';}
-      else{
-        interval=7;note='安定傾向 → 週1回確認へ移行可能';
-        sched.push({day:anchorDay+interval,projINR:projAt(interval),dose:curDose,nextDose,note,inRange:true});
-        break;
-      }
-    }
-
-    nextDose=Math.max(0.5,Math.min(15,nextDose));
-    const checkDay=anchorDay+interval;
-    const checkINR=projAt(interval);
-    sched.push({day:checkDay,projINR:checkINR,dose:curDose,nextDose,note,inRange:checkINR>=tLow&&checkINR<=tHigh});
-    anchorDay=checkDay;anchorINR=checkINR;curDose=nextDose;
-  }
-  return sched;
+  return [{
+    day:lastDay+interval,
+    projINR:checkINR,
+    dose:recDose,
+    nextDose:recDose,
+    note,
+    inRange:checkINR>=tLow&&checkINR<=tHigh
+  }];
 }
 
 function renderSchedule(sched,startDate,lastDay,lastDayHasDose){
@@ -1247,30 +1329,27 @@ function renderSchedule(sched,startDate,lastDay,lastDayHasDose){
     return d?`<span class="sch-day-date"> (${fmtDate(d)})</span>`:'';
   };
   el.innerHTML=sched.map((s,idx)=>{
-    // 投与開始タイミング
     let fromLabel;
-    if(idx===0){
-      if(!lastDayHasDose){
-        fromLabel=`本日夜より${dateTxt(lastDay)}`;
-      } else {
-        fromLabel=`翌日より${dateTxt(lastDay+1)}`;
-      }
+    if(!lastDayHasDose){
+      fromLabel=`本日夜より${dateTxt(lastDay)}`;
     } else {
-      const prevDay=sched[idx-1].day;
-      fromLabel=`${prevDay}日目より${dateTxt(prevDay)}`;
+      fromLabel=`翌日より${dateTxt(lastDay+1)}`;
     }
     const doseStr=s.dose<0.25?'休薬':`${s.dose.toFixed(1)} mg/日`;
     const followDay=`<strong>${s.day}日目${dateTxt(s.day)}</strong>`;
-    return `<div class="sch-item"><span class="sch-day">${fromLabel}</span><span class="sch-inr"><span class="sch-dose">${doseStr}</span></span><span class="sch-body">→ ${followDay}にフォロー推奨<span class="sch-day-date">（INR推定 ${s.projINR.toFixed(1)}）</span></span></div>`;
+    return `<div class="sch-item"><span class="sch-day">${fromLabel}</span><span class="sch-inr"><span class="sch-dose">${doseStr}</span></span><span class="sch-body">${s.note}。→ ${followDay}にフォロー推奨<span class="sch-day-date">（INR推定 ${s.projINR.toFixed(1)}）</span></span></div>`;
   }).join('');
 }
 
 // ── 導入期チャート（スケジュール予測含む） ──────────────────
-function buildInitChart(log,inrPts,lastDay,tLow,tHigh,tau,keff,avgDose,startDate,schedule,baseINR,lastDayHasDose){
-  const maxDay=lastDay+28;
+function buildInitChart(log,inrPts,lastDay,tLow,tHigh,avgDose,startDate,schedule,baseINR,lastDayHasDose,a,b,priorDose,dosePts){
+  const followDay=schedule&&schedule.length?schedule[schedule.length-1].day:lastDay;
+  const actualMaxDay=log.length?Math.max(...log.map(p=>p.day)):lastDay;
+  const maxDay=Math.max(lastDay+3,followDay+1,actualMaxDay);
   const labels=[];for(let d=0;d<=maxDay;d++)labels.push(d);
 
-  const actualData=labels.map(d=>{const p=inrPts.find(x=>x.day===d);return p?p.inr:null;});
+  const actualRows=log.filter(p=>p.inr!==null);
+  const actualData=labels.map(d=>{const p=actualRows.find(x=>x.day===d);return p?p.inr:null;});
   // 投与量バー：記録済み vs 空白補完（前回継続）に分けて色を変える
   const dPts=log.filter(p=>p.dose!==null);
   const recordedDoseData=labels.map(d=>{
@@ -1287,8 +1366,8 @@ function buildInitChart(log,inrPts,lastDay,tLow,tHigh,tau,keff,avgDose,startDate
     return effectiveDose(dPts,d);       // 空白日は前回値を継続
   });
 
-  // スケジュール予測軌跡（区分的指数モデル）
-  const schedTraj=buildScheduleTrajectory(lastDay,latestINRGlobal,schedule,avgDoseGlobal,tau,keff,labels,baseINR);
+  const schedTraj=buildScheduleTrajectory(lastDay,latestINRGlobal,schedule,labels,baseINR,a,b,priorDose);
+  const predBand=buildPredictionBand(lastDay,latestINRGlobal,schedule,labels,baseINR,a,b,priorDose,dosePts,inrPts);
 
   // 予測投与量バー
   // 当日投与量が未入力の場合は lastDay から、入力済みなら lastDay+1 から予測バーを表示
@@ -1311,8 +1390,11 @@ function buildInitChart(log,inrPts,lastDay,tLow,tHigh,tau,keff,avgDose,startDate
       {type:'bar',label:'予測投与量',data:projDoseData,backgroundColor:dark?'rgba(55,138,221,0.25)':'rgba(24,95,165,0.15)',borderColor:dark?'rgba(55,138,221,0.5)':'rgba(24,95,165,0.35)',borderWidth:1,yAxisID:'y2',order:4},
       // 実測INR
       {type:'line',label:'実測INR',data:actualData,borderColor:'#D85A30',backgroundColor:'#D85A30',pointRadius:6,pointHoverRadius:8,showLine:false,spanGaps:false,yAxisID:'y1',order:1},
+      // 予測不確実帯（1点除外再推定）
+      {type:'line',label:'予測下限',data:predBand.lower,borderColor:'rgba(0,0,0,0)',backgroundColor:'rgba(0,0,0,0)',pointRadius:0,spanGaps:false,yAxisID:'y1',order:2},
+      {type:'line',label:'予測不確実帯',data:predBand.upper,borderColor:'rgba(0,0,0,0)',backgroundColor:dark?'rgba(55,138,221,0.14)':'rgba(24,95,165,0.12)',pointRadius:0,spanGaps:false,fill:'-1',yAxisID:'y1',order:2},
       // スケジュール予測INR軌跡
-      {type:'line',label:'スケジュール予測',data:schedTraj,borderColor:dark?'#378ADD':'#185FA5',borderWidth:2,pointRadius:0,tension:0.3,spanGaps:false,borderDash:[],yAxisID:'y1',order:2},
+      {type:'line',label:'スケジュール予測',data:schedTraj,borderColor:dark?'#378ADD':'#185FA5',borderWidth:2,pointRadius:0,tension:0.3,spanGaps:false,borderDash:[],yAxisID:'y1',order:3},
       // 確認予定日マーカー
       {type:'line',label:'確認予定日',data:schedMarkers,borderColor:dark?'#378ADD':'#185FA5',backgroundColor:dark?'#378ADD':'#185FA5',pointRadius:7,pointStyle:'triangle',showLine:false,spanGaps:false,yAxisID:'y1',order:0},
     ]},
@@ -1348,6 +1430,7 @@ function buildInitChart(log,inrPts,lastDay,tLow,tHigh,tau,keff,avgDose,startDate
   const legDark=isDark();
   document.getElementById('i-legend').innerHTML=`
     <span class="leg-item"><span style="width:8px;height:8px;border-radius:50%;background:#D85A30;display:inline-block;"></span>実測INR</span>
+    <span class="leg-item"><span style="width:14px;height:10px;background:${legDark?'rgba(55,138,221,0.14)':'rgba(24,95,165,0.12)'};display:inline-block;border-radius:2px;"></span>予測不確実帯</span>
     <span class="leg-item"><span style="width:18px;height:2px;background:${legDark?'#378ADD':'#185FA5'};display:inline-block;border-radius:1px;"></span>スケジュール予測</span>
     <span class="leg-item"><span style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:10px solid ${legDark?'#378ADD':'#185FA5'};display:inline-block;"></span>確認予定日</span>
     <span class="leg-item"><span style="width:14px;height:10px;background:${legDark?'rgba(180,178,169,0.45)':'rgba(136,135,128,0.28)'};display:inline-block;border-radius:2px;"></span>実測投与量</span>
